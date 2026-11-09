@@ -29,6 +29,8 @@ type Orientation = 'portrait' | 'landscape';
 
 const ZOOM_STEPS = [1, 1.25, 1.5, 2, 2.5, 3];
 
+const ODD_RIGHT_KEY = 'ebook-odd-right';
+
 function clampPage(n: number, total: number): number {
   return Math.min(Math.max(1, Math.round(n)), total);
 }
@@ -36,10 +38,12 @@ function clampPage(n: number, total: number): number {
 function buildPageElements(
   pageCount: number,
   fileName: string,
+  oddRight: boolean,
 ): { els: HTMLElement[]; imgs: (HTMLImageElement | null)[] } {
   const els: HTMLElement[] = [];
   const imgs: (HTMLImageElement | null)[] = [];
-  for (let i = 0; i <= pageCount + 1; i += 1) {
+  const totalFlip = pageCount + 2 + (oddRight ? 1 : 0);
+  for (let i = 0; i < totalFlip; i += 1) {
     const el = document.createElement('div');
     if (i === 0) {
       el.className = 'book-page book-page-cover';
@@ -54,7 +58,7 @@ function buildPageElements(
       inner.append(title, sub);
       el.appendChild(inner);
       imgs.push(null);
-    } else if (i === pageCount + 1) {
+    } else if (i === totalFlip - 1) {
       el.className = 'book-page book-page-back';
       const inner = document.createElement('div');
       inner.className = 'cover-inner';
@@ -64,19 +68,27 @@ function buildPageElements(
       inner.appendChild(sub);
       el.appendChild(inner);
       imgs.push(null);
+    } else if (oddRight && i === 1) {
+      el.className = 'book-page book-page-blank';
+      const caption = document.createElement('span');
+      caption.className = 'blank-caption';
+      caption.textContent = '빈 페이지';
+      el.appendChild(caption);
+      imgs.push(null);
     } else {
+      const pdfPage = oddRight ? i - 1 : i;
       el.className = 'book-page book-page-content';
       const frame = document.createElement('div');
       frame.className = 'page-frame';
       const img = document.createElement('img');
       img.className = 'page-img';
-      img.alt = `${i}쪽`;
+      img.alt = `${pdfPage}쪽`;
       img.draggable = false;
       const loader = document.createElement('div');
       loader.className = 'page-loader';
       const num = document.createElement('span');
       num.className = 'page-num';
-      num.textContent = String(i);
+      num.textContent = String(pdfPage);
       loader.appendChild(num);
       frame.append(img, loader);
       el.appendChild(frame);
@@ -107,6 +119,8 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
   const aspectRef = useRef({ width: 595, height: 842 });
   const dimsRef = useRef<BookDims | null>(null);
   const skipZoomEffectRef = useRef(true);
+  const bookOddRightRef = useRef(false);
+  const startPdfRef = useRef(0);
 
   const [bookDims, setBookDims] = useState<BookDims | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -114,6 +128,21 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [pageInput, setPageInput] = useState('');
+  const [oddRight, setOddRight] = useState(() => {
+    try {
+      return localStorage.getItem(ODD_RIGHT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ODD_RIGHT_KEY, oddRight ? '1' : '0');
+    } catch {
+      return;
+    }
+  }, [oddRight]);
 
   const applyRendered = useCallback((flipIndex: number, url: string) => {
     const img = imgsRef.current[flipIndex];
@@ -128,25 +157,40 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
     preload.src = url;
   }, []);
 
+  const flipToPdfWith = (flipIndex: number, odd: boolean): number | null => {
+    if (odd) {
+      return flipIndex >= 2 ? flipIndex - 1 : null;
+    }
+    return flipIndex >= 1 ? flipIndex : null;
+  };
+
+  const flipToPdf = (flipIndex: number): number | null =>
+    flipToPdfWith(flipIndex, bookOddRightRef.current);
+
+  const pdfToFlip = (pdfPage: number): number => {
+    if (!bookOddRightRef.current) return pdfPage;
+    return pdfPage + 1;
+  };
+
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;
     try {
       while (!cancelledRef.current && queueRef.current.length > 0) {
-        const flipIndex = queueRef.current.shift();
-        if (flipIndex === undefined) break;
-        if (flipIndex < 1 || flipIndex > pageCountRef.current) continue;
-        let url = cacheRef.current.get(flipIndex);
+        const pdfPage = queueRef.current.shift();
+        if (pdfPage === undefined) break;
+        if (pdfPage < 1 || pdfPage > pageCountRef.current) continue;
+        let url = cacheRef.current.get(pdfPage);
         if (!url) {
           try {
-            url = await renderPageToDataUrl(doc, flipIndex, renderScaleForZoom(zoomRef.current));
+            url = await renderPageToDataUrl(doc, pdfPage, renderScaleForZoom(zoomRef.current));
           } catch {
             continue;
           }
           if (cancelledRef.current) return;
-          cacheRef.current.set(flipIndex, url);
+          cacheRef.current.set(pdfPage, url);
         }
-        applyRendered(flipIndex, url);
+        applyRendered(pdfToFlip(pdfPage), url);
       }
     } finally {
       processingRef.current = false;
@@ -156,11 +200,13 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
   const enqueueAround = useCallback(
     (center: number) => {
       const total = pageCountRef.current;
+      const centerPdf = flipToPdf(center) ?? flipToPdf(center + 1) ?? 1;
       const candidates: number[] = [];
       for (let i = center - 4; i <= center + 4; i += 1) {
-        if (i >= 1 && i <= total) candidates.push(i);
+        const pdf = flipToPdf(i);
+        if (pdf !== null && pdf >= 1 && pdf <= total) candidates.push(pdf);
       }
-      candidates.sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
+      candidates.sort((a, b) => Math.abs(a - centerPdf) - Math.abs(b - centerPdf));
       for (const c of candidates) {
         if (!cacheRef.current.has(c) && !queueRef.current.includes(c)) {
           queueRef.current.push(c);
@@ -210,7 +256,12 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
     let cancelledLocal = false;
     let resizeTimer: number | null = null;
 
-    const start = (preserveIndex: number) => {
+    const start = () => {
+      bookOddRightRef.current = oddRight;
+      const totalFlip = pageCountRef.current + 2 + (oddRight ? 1 : 0);
+      const preserve = startPdfRef.current;
+      const startFlipIndex =
+        preserve === 0 ? 0 : preserve === -1 ? totalFlip - 1 : oddRight ? preserve + 1 : preserve;
       if (flip) {
         try {
           flip.destroy();
@@ -226,13 +277,13 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
       dimsRef.current = dims;
       setBookDims(dims);
       setOrientation(dims.portrait ? 'portrait' : 'landscape');
-      const { els, imgs } = buildPageElements(pageCountRef.current, fileName);
+      const { els, imgs } = buildPageElements(pageCountRef.current, fileName, oddRight);
       imgsRef.current = imgs;
       const el = document.createElement('div');
       host.appendChild(el);
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       flip = new PageFlip(el, {
-        startPage: preserveIndex,
+        startPage: startFlipIndex,
         size: 'fixed',
         width: dims.pageW,
         height: dims.pageH,
@@ -245,9 +296,17 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
       });
       flipRef.current = flip;
       flip.on('flip', (e) => {
-        const idx = typeof e.data === 'number' ? e.data : preserveIndex;
+        const idx = typeof e.data === 'number' ? e.data : startFlipIndex;
         currentIndexRef.current = idx;
         setCurrentIndex(idx);
+        if (idx === 0) {
+          startPdfRef.current = 0;
+        } else if (idx === totalFlip - 1) {
+          startPdfRef.current = -1;
+        } else {
+          const pdf = flipToPdf(idx);
+          if (pdf !== null) startPdfRef.current = pdf;
+        }
         enqueueAround(idx);
       });
       flip.on('changeOrientation', (e) => {
@@ -256,9 +315,10 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
         }
       });
       flip.loadFromHTML(els);
-      currentIndexRef.current = preserveIndex;
-      setCurrentIndex(preserveIndex);
-      enqueueAround(preserveIndex);
+      const resolvedIndex = flip.getCurrentPageIndex();
+      currentIndexRef.current = resolvedIndex;
+      setCurrentIndex(resolvedIndex);
+      enqueueAround(resolvedIndex);
     };
 
     const run = async () => {
@@ -268,7 +328,7 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
         aspectRef.current = { width: 595, height: 842 };
       }
       if (cancelledLocal) return;
-      start(0);
+      start();
     };
     void run();
 
@@ -279,7 +339,7 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
         const next = computeDims();
         const prev = dimsRef.current;
         if (!prev || next.w !== prev.w || next.h !== prev.h) {
-          start(currentIndexRef.current);
+          start();
         }
       }, 200);
     };
@@ -303,7 +363,7 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
       queue.length = 0;
       host.innerHTML = '';
     };
-  }, [computeDims, doc, enqueueAround, fileName]);
+  }, [computeDims, doc, enqueueAround, fileName, oddRight]);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -377,7 +437,7 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
     const n = Number(pageInput);
     const flip = flipRef.current;
     if (!flip || !Number.isFinite(n)) return;
-    flip.turnToPage(clampPage(n, pageCount));
+    flip.turnToPage(pdfToFlip(clampPage(n, pageCount)));
     setPageInput('');
   };
 
@@ -393,25 +453,30 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
     return flat.slice(0, 100);
   }, [outline]);
 
-  const totalFlipPages = pageCount + 2;
+  const totalFlipPages = pageCount + 2 + (oddRight ? 1 : 0);
+  const visiblePdfs: number[] = [];
+  if (currentIndex > 0 && currentIndex < totalFlipPages - 1) {
+    const leftPdf = flipToPdfWith(currentIndex, oddRight);
+    if (leftPdf !== null && leftPdf >= 1 && leftPdf <= pageCount) visiblePdfs.push(leftPdf);
+    if (orientation === 'landscape') {
+      const rightPdf = flipToPdfWith(currentIndex + 1, oddRight);
+      if (rightPdf !== null && rightPdf >= 1 && rightPdf <= pageCount) visiblePdfs.push(rightPdf);
+    }
+  }
   let indicator: string;
   if (currentIndex <= 0) {
     indicator = `표지 · 1/${pageCount}쪽`;
   } else if (currentIndex >= totalFlipPages - 1) {
     indicator = `뒷표지 · ${pageCount}/${pageCount}쪽`;
-  } else if (orientation === 'portrait') {
-    indicator = `${currentIndex}쪽 / ${pageCount}쪽`;
+  } else if (visiblePdfs.length === 0) {
+    indicator = '빈 페이지';
+  } else if (visiblePdfs.length === 1) {
+    indicator = `${visiblePdfs[0]}쪽 / ${pageCount}쪽`;
   } else {
-    const left = currentIndex;
-    const right = Math.min(currentIndex + 1, pageCount);
-    indicator = left === right ? `${left}쪽 / ${pageCount}쪽` : `${left}–${right}쪽 / ${pageCount}쪽`;
+    indicator = `${visiblePdfs[0]}–${visiblePdfs[1]}쪽 / ${pageCount}쪽`;
   }
   const progress =
-    currentIndex <= 0
-      ? 0
-      : currentIndex >= totalFlipPages - 1
-        ? 1
-        : Math.min(Math.max((currentIndex + (orientation === 'landscape' ? 1 : 0)) / pageCount, 0), 1);
+    visiblePdfs.length > 0 ? Math.max(...visiblePdfs) / pageCount : currentIndex <= 0 ? 0 : 1;
 
   return (
     <section className="viewer" ref={viewerRef} aria-label="전자책 보기">
@@ -479,6 +544,16 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
               <path d="M3 8h10M8 3v10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
+          <span className="viewer-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className={`btn btn-ghost btn-sm${oddRight ? ' toggle-btn-active' : ''}`}
+            aria-pressed={oddRight}
+            title="홀수 페이지를 오른쪽에 배치"
+            onClick={() => setOddRight((v) => !v)}
+          >
+            홀수 페이지 오른쪽
+          </button>
           <button
             type="button"
             className="icon-btn"
@@ -535,7 +610,7 @@ export default function BookViewer({ doc, pageCount, fileName, outline, onClose 
                     style={{ paddingLeft: `${12 + item.depth * 16}px` }}
                     disabled={item.page === null}
                     onClick={() => {
-                      if (item.page) flipRef.current?.turnToPage(item.page);
+                      if (item.page) flipRef.current?.turnToPage(pdfToFlip(item.page));
                     }}
                   >
                     {item.title || `제목 없음`}{item.page ? ` · ${item.page}쪽` : ''}
