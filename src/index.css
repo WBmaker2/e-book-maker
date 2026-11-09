@@ -99,15 +99,15 @@ summary:focus-visible {
   background: rgba(232, 220, 199, 0.12);
 }
 
-.btn-link {
+.btn-outline {
   background: transparent;
   color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  border-color: var(--clay);
 }
 
-.btn-link:hover {
-  color: var(--terracotta-dark);
+.btn-outline:hover {
+  background: rgba(198, 107, 61, 0.12);
+  border-color: var(--terracotta);
 }
 
 .btn-pulse {
@@ -136,12 +136,11 @@ summary:focus-visible {
   padding: 24px;
 }
 
-.landing-topbar {
-  width: 100%;
-  max-width: 880px;
+.landing-actions {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .book-card {
@@ -275,6 +274,13 @@ summary:focus-visible {
 .modal-head h2 {
   margin: 0;
   font-size: 1.4rem;
+}
+
+.modal-summary {
+  margin: 0;
+  padding: 8px 24px 0;
+  font-size: 0.92rem;
+  color: rgba(46, 33, 24, 0.72);
 }
 
 .modal-body {

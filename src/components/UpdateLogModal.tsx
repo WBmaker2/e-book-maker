@@ -46,6 +46,8 @@ export default function UpdateLogModal({ open, onClose }: UpdateLogModalProps) {
   if (!open) return null;
 
   const entries = parseUpdateLog(updateLogRaw);
+  const firstDate = entries[0]?.date;
+  const lastDate = entries[entries.length - 1]?.date;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -58,10 +60,16 @@ export default function UpdateLogModal({ open, onClose }: UpdateLogModalProps) {
       >
         <div className="modal-head">
           <h2>업데이트 내역</h2>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-outline btn-sm" onClick={onClose}>
             닫기
           </button>
         </div>
+        {entries.length > 0 && (
+          <p className="modal-summary">
+            {firstDate} 처음 제작 · 총 {entries.length}일의 기록
+            {lastDate && lastDate !== firstDate ? ` · 마지막 수정 ${lastDate}` : ''}
+          </p>
+        )}
         <div className="modal-body">
           {entries.length === 0 ? (
             <p className="modal-empty">아직 기록이 없어요.</p>

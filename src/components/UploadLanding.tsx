@@ -19,12 +19,6 @@ export default function UploadLanding({ error, loading, onFile }: UploadLandingP
 
   return (
     <main className="landing">
-      <div className="landing-topbar">
-        <button type="button" className="btn btn-link" onClick={() => setLogOpen(true)}>
-          업데이트 내역
-        </button>
-      </div>
-
       <section className="book-card">
         <div className="book-spine" aria-hidden="true" />
         <div className="book-card-body">
@@ -64,14 +58,19 @@ export default function UploadLanding({ error, loading, onFile }: UploadLandingP
             }}
           />
 
-          <button
-            type="button"
-            className="btn btn-primary btn-pulse btn-lg"
-            disabled={loading}
-            onClick={() => inputRef.current?.click()}
-          >
-            {loading ? 'PDF 여는 중…' : 'PDF 선택'}
-          </button>
+          <div className="landing-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-pulse btn-lg"
+              disabled={loading}
+              onClick={() => inputRef.current?.click()}
+            >
+              {loading ? 'PDF 여는 중…' : 'PDF 선택'}
+            </button>
+            <button type="button" className="btn btn-outline btn-lg" onClick={() => setLogOpen(true)}>
+              업데이트 내역
+            </button>
+          </div>
 
           {error && (
             <p className="error-banner" role="alert">
